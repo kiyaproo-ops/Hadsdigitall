@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <h1>benyamin pol dar shodim</h1>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نمودار و پیش‌بینی اتریوم</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+body { font-family: Arial, sans-serif; direction: rtl; padding: 20px; background:#f5f6fa; }
+h1 { text-align:center; color:#333; }
+canvas { max-width: 100%; height: 350px; margin-bottom:20px; background:white; border-radius:10px; box-shadow:0 5px 15px rgba(0,0,0,0.1); }
+button { margin:5px; padding:10px 15px; font-size:14px; cursor:pointer; border-radius:6px; border:1px solid #ccc; background:#fff; transition:background 0.2s;}
+button:hover { background:#eee; }
+button.primary { background:#0b74de; color:white; border-color:#0b74de; }
+button.primary:hover { background:#0a65c3; }
+.card { background:white; padding:15px; margin-top:12px; border-radius:8px; box-shadow:0 3px 8px rgba(0,0,0,0.08); border-right: 5px solid #0b74de; }
+.result { margin-top:8px; padding:6px; border-radius:4px; font-weight:bold; }
+.good { background:#f0fff4; color:#00792b; border-right: 3px solid #00792b;}
+.bad { background:#fff0f0; color:#a80000; border-right: 3px solid #a80000;}
+.prediction-header { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:5px; margin-bottom:8px;}
+</style>
+</head>
+<body>
+
+<h1>نمودار و پیش‌بینی لحظه‌ای اتریوم (ETH/USD)</h1>
+<canvas id="ethChart"></canvas>
+
+<div>
+    <button class="primary" data-sec="15">پیش‌بینی ۱۵ ثانیه</button>
+    <button class="primary" data-sec="30">پیش‌بینی ۳۰ ثانیه</button>
+    <button class="primary" data-sec="60">پیش‌بینی ۱ دقیقه</button>
+    <button class="primary" data-sec="120">پیش‌بینی ۲ دقیقه</button>
+    <button class="primary" data-sec="180">پیش‌بینی ۳ دقیقه</button>
+    <button class="primary" data-sec="300">پیش‌بینی ۵ دقیقه</button>
+</div>
+
+<div id="predictions"></div>
+
+<script>
+const API_URL = "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd";
+const chartCtx = document.getElementById('ethChart'); // دریافت context بعد از اطمینان از وجود canvas
+const MAX_DATA_POINTS = 180; // نگهداری داده برای 6 دقیقه
+const POLLING_INTERVAL_MS = 2000; // هر 2 ثانیه
+let priceData = [];
+let timeLabels = [];
+let chartInstance = null; // برای نگهداری نمونه نمودار
+
+// --- 1. مقداردهی اولیه نمودار ---
+function initializeChart() {
+    if (!chartCtx) {
+        console.error("خطا: عنصر Canvas یافت نشد!");
+        return;
+    }
+    const ctx = chartCtx.getContext('2d');
+    if (!ctx) {
+        console.error("خطا: نتوانستیم context نمودار را دریافت کنیم!");
+        return;
+    }
+
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: timeLabels,
+            datasets: [{
+                label: 'ETH/USD',
+                data: priceData,
+                borderColor: 'rgba(75,192,192,1)',
+                backgroundColor: 'rgba(75,192,192,0.2)',
+                fill: true,
+                tension: 0.2,
+                pointRadius: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            animation: false, // غیرفعال کردن انیمیشن برای به‌روزرسانی سریع‌تر
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    title: { display: true, text: 'قیمت (USD)' }
+                },
+                x: {
+                    title: { display: true, text: 'زمان' }
+                }
+            }
+        }
+    });
+    console.log("نمودار با موفقیت مقداردهی اولیه شد.");
+}
+
+// --- 2. توابع اصلی داده و API ---
+async function fetchPrice() {
+    try {
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+            console.error(`خطای شبکه در درخواست API: وضعیت ${response.status}`);
+            // در صورت خطا، آخرین قیمت موجود را برگردان (اگر وجود داشته باشد)
+            return priceData.length > 0 ? priceData[priceData.length - 1] : null;
+        }
+        const data = await response.json();
+        if (data && data.ethereum && typeof data.ethereum.usd === 'number') {
+            return data.ethereum.usd;
+        } else {
+            console.error('پاسخ نامعتبر از API:', data);
+            return priceData.length > 0 ? priceData[priceData.length - 1] : null;
+        }
+    } catch (error) {
+        console.error('خطا در پردازش پاسخ API:', error);
+        return priceData.length > 0 ? priceData[priceData.length - 1] : null;
+    }
+}
+
+function addData(price) {
+    if (price === null) {
+        console.warn("قیمت نامعتبر است، اضافه نمی‌شود.");
+        return;
+    }
+    const now = new Date();
+    const timeString = now.toLocaleTimeString('fa-IR'); // استفاده از فرمت محلی برای زمان
+
+    priceData.push(price);
+    timeLabels.push(timeString);
+
+    // محدود کردن تعداد نقاط داده
+    if (priceData.length > MAX_DATA_POINTS) {
+        priceData.shift();
+        timeLabels.shift();
+    }
+
+    // به‌روزرسانی نمودار
+    if (chartInstance) {
+        chartInstance.update('none'); // 'none' برای جلوگیری از انیمیشن در هر به‌روزرسانی
+    } else {
+        console.error("نمونه نمودار (chartInstance) وجود ندارد. نمودار به‌روزرسانی نمی‌شود.");
+    }
+}
+
+async function updateChart() {
+    const currentPrice = await fetchPrice();
+    if (currentPrice !== null) {
+        addData(currentPrice);
+    } else {
+        console.warn("قیمت دریافت نشد، نمودار به‌روز نمی‌شود.");
+    }
+}
+
+// --- 3. منطق پیش‌بینی (رگرسیون خطی) ---
+function linearRegression(xs, ys) {
+    const n = xs.length;
+    if (n < 2) {
+        console.warn("برای رگرسیون خطی نیاز به حداقل ۲ نقطه داده است.");
+        // در صورت کم بودن داده، آخرین قیمت موجود را برگردان یا 0
+        return { slope: 0, intercept: ys.length > 0 ? ys[ys.length - 1] : 0 };
+    }
+    let sumx = 0, sumy = 0, sumxy = 0, sumxx = 0;
+    for (let i = 0; i < n; i++) {
+        sumx += xs[i];
+        sumy += ys[i];
+        sumxy += xs[i] * ys[i];
+        sumxx += xs[i] * xs[i];
+    }
+    const denom = n * sumxx - sumx * sumx;
+    // جلوگیری از تقسیم بر صفر
+    if (Math.abs(denom) < 1e-12) {
+        console.warn("مخرج رگرسیون خطی بسیار نزدیک به صفر است.");
+        return { slope: 0, intercept: sumy / n }; // میانگین مقادیر y
+    }
+    const slope = (n * sumxy - sumx * sumy) / denom;
+    const intercept = (sumy - slope * sumx) / n;
+    return { slope, intercept };
+}
+
+let predictionCounter = 0;
+function createPredictionTask(secondsAhead) {
+    predictionCounter++;
+    const predictionId = `pred-${predictionCounter}`;
+    const container = document.createElement('div');
+    container.id = predictionId;
+    container.className = 'card';
+    container.innerHTML = `
+    <div class="prediction-header">
+        <div><strong>پیش‌بینی — ${secondsAhead} ثانیه بعد</strong></div>
+        <div id="${predictionId}-countdown">شروع...</div>
+    </div>
+    <div style="margin-top:6px;">
+        <div>پیش‌بینی: <span id="${predictionId}-pred" style="font-weight:bold; color:#007bff;">—</span></div>
+        <div>قیمت واقعی: <span id="${predictionId}-actual" style="font-weight:bold;">—</span></div>
+        <div>خطای مطلق: <span id="${predictionId}-error" style="font-weight:bold;">—</span></div>
+        <div id="${predictionId}-result" class="result">در حال انتظار برای زمان هدف...</div>
+    </div>
+    `;
+    document.getElementById('predictions').prepend(container);
+
+    // استفاده از حداکثر 40 نقطه آخر یا کمتر اگر داده‌ها کمتر باشند
+    const pointsForRegression = Math.min(40, priceData.length);
+    if (pointsForRegression < 3) {
+        alert("لطفاً چند ثانیه صبر کنید تا داده کافی برای پیش‌بینی جمع‌آوری شود (حداقل ۳ نقطه).");
+        return; // توقف اجرای پیش‌بینی
+    }
+
+    const nowTimestampSec = Date.now() / 1000;
+    const xs = []; // زمان (به ثانیه)
+    const ys = []; // قیمت
+
+    // محاسبه زمان نسبی برای هر نقطه داده
+    for (let i = priceData.length - pointsForRegression; i < priceData.length; i++) {
+        // محاسبه زمان از دست رفته بر اساس فاصله زمانی ثابت بین نقاط
+        const elapsedSeconds = (priceData.length - 1 - i) * (POLLING_INTERVAL_MS / 1000);
+        xs.push(nowTimestampSec - elapsedSeconds); // زمان نسبی (ثانیه از الان)
+        ys.push(priceData[i]);
+    }
+
+    const { slope, intercept } = linearRegression(xs, ys);
+    const targetTimestampSec = nowTimestampSec + secondsAhead;
+    const predictedPrice = intercept + slope * targetTimestampSec;
+
+    const predValueEl = document.getElementById(`${predictionId}-pred`);
+    if (predValueEl) predValueEl.textContent = predictedPrice.toFixed(3);
+
+    // شمارش معکوس
+    let remainingSeconds = secondsAhead;
+    const countdownEl = document.getElementById(`${predictionId}-countdown`);
+    if (countdownEl) {
+        countdownEl.textContent = `${remainingSeconds} ثانیه باقی‌مانده`;
+        const countdownInterval = setInterval(() => {
+            remainingSeconds--;
+            if (remainingSeconds >= 0) {
+                if (countdownEl) countdownEl.textContent = `${remainingSeconds} ثانیه باقی‌مانده`;
+            } else {
+                clearInterval(countdownInterval);
+                if (countdownEl) countdownEl.textContent = 'اتمام زمان';
+            }
+        }, 1000);
+    }
+
+    // پس از زمان هدف، قیمت واقعی را دریافت و مقایسه کن
+    setTimeout(async () => {
+        const actualPrice = await fetchPrice();
+        const resultEl = document.getElementById(`${predictionId}-result`);
+        const actualPriceEl = document.getElementById(`${predictionId}-actual`);
+        const errorEl = document.getElementById(`${predictionId}-error`);
+
+        // بررسی استفاده از Fallback یا آخرین قیمت موجود
+        const isFallback = (actualPrice === null) || (priceData.length > 0 && actualPrice === priceData[priceData.length - 1] && actualPrice !== ys[ys.length - 1]);
+
+        if (actualPriceEl) actualPriceEl.textContent = actualPrice !== null ? actualPrice.toFixed(3) : 'خطا';
+
+        if (isFallback) {
+            if (errorEl) errorEl.textContent = '—';
+            if (resultEl) {
+                resultEl.className = 'result'; // Reset class
+                resultEl.textContent = 'خطا در دریافت قیمت واقعی';
+            }
+             console.warn(`پیش‌بینی ${predictionId}: از Fallback یا آخرین قیمت موجود استفاده شد.`);
+        } else if (actualPrice !== null) {
+            const absoluteError = Math.abs(actualPrice - predictedPrice);
+            const percentageError = (absoluteError / actualPrice) * 100;
+            if (errorEl) errorEl.textContent = `${absoluteError.toFixed(3)} (${percentageError.toFixed(2)}%)`;
+
+            if (resultEl) {
+                if (predictedPrice < actualPrice) {
+                    resultEl.className = 'result good';
+                    resultEl.textContent = 'پیش‌بینی: افزایش (صحیح)';
+                } else if (predictedPrice > actualPrice) {
+                    resultEl.className = 'result bad';
+                    resultEl.textContent = 'پیش‌بینی: کاهش (صحیح)';
+                } else {
+                    resultEl.className = 'result good';
+                    resultEl.textContent = 'پیش‌بینی دقیقاً مطابق با قیمت واقعی';
+                }
+            }
+        } else {
+             if (errorEl) errorEl.textContent = '—';
+             if (resultEl) {
+                 resultEl.className = 'result'; // Reset class
+                 resultEl.textContent = 'قیمت واقعی دریافت نشد';
+             }
+        }
+    }, secondsAhead * 1000);
+}
+
+// --- 4. اجرای اولیه و تنظیم شنوندگان ---
+
+// مقداردهی اولیه نمودار پس از بارگذاری DOM
+document.addEventListener('DOMContentLoaded', () => {
+    initializeChart();
+
+    // افزودن شنونده‌ها برای دکمه‌های پیش‌بینی
+    document.querySelectorAll('button.primary').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const seconds = parseInt(btn.dataset.sec, 10);
+            createPredictionTask(seconds);
+        });
+    });
+
+    // اجرای اولیه و شروع پایش خودکار
+    updateChart(); // دریافت و افزودن اولین نقطه داده
+    setInterval(updateChart, POLLING_INTERVAL_MS);
+    console.log("مقداردهی اولیه و شروع پایش انجام شد.");
+});
+
+// ثبت خطاها در کنسول برای اشکال‌زدایی
+window.onerror = function(message, source, lineno, colno, error) {
+    console.error(`خطای سراسری: ${message} در ${source}:${lineno}:${colno}`, error);
+    return true; // جلوگیری از نمایش پیام خطای پیش‌فرض مرورگر
+};
+window.addEventListener('error', (event) => {
+    console.error('خطای رویداد:', event.error);
+});
+console.log("اسکریپت آماده است.");
+
+</script>
+</body>
+</html>
